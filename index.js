@@ -39,23 +39,41 @@ async function run() {
         return res.status(400).send("Ebook data is required");
       }
       const result = await allEbook.insertOne(ebookData);
-      res.json({ success: true, message: "Ebook data inserted successfully", result });
+      res.json({
+        success: true,
+        message: "Ebook data inserted successfully",
+        result,
+      });
       console.log(result);
     });
-    app.get("/api/all-ebook", async (req, res) => { // all ebooks including unpublished ones for writer and admin 
-      const ebookData = await allEbook.find({}).toArray();
-      console.log(ebookData);
-      const AuthorId = await ebookData.FindOne({ _id: new ObjectId(ebookData.authorId) });
-      const AuthorEmail = await ebookData.FindOne(author })
-      res.json({ success: true, message: "Ebook data retrieved successfully", data: ebookData });
-      console.log(ebookData);
+    app.get("/api/all-ebook", async (req, res) => {
+      // all ebooks including unpublished ones for writer and admin
+      const UserEmail = req.query.email;
+      const UserId = req.query.id;
+      console.log("user query", UserEmail);
+      const FilteredEbooks = await allEbook.find({
+        authorId: UserId,
+        authorEmail: UserEmail,
+      }).toArray();
+      // console.log(FilteredEbooks);
+      res.json({
+        success: true,
+        message: "Ebook data retrieved successfully",
+        data: FilteredEbooks,
+      });
+      console.log(FilteredEbooks);
     });
-    app.get("/api/all-ebooks", async (req, res) => { // all ebooks only published ones for public
+    app.get("/api/all-ebooks", async (req, res) => {
+      // all ebooks only published ones for public
       const cursor = allEbook.find({
         isPublished: true,
       });
       const ebookData = await cursor.toArray();
-      res.json({ success: true, message: "Ebook data retrieved successfully", data: ebookData });
+      res.json({
+        success: true,
+        message: "Ebook data retrieved successfully",
+        data: ebookData,
+      });
       console.log(ebookData);
     });
     app.get("/api/ebook/:id", async (req, res) => {
@@ -64,16 +82,27 @@ async function run() {
       if (!ebookData) {
         return res.status(404).send("Ebook not found");
       }
-      res.json({ success: true, message: "Ebook data retrieved successfully", data: ebookData });
+      res.json({
+        success: true,
+        message: "Ebook data retrieved successfully",
+        data: ebookData,
+      });
       console.log(ebookData);
     });
     app.put("/api/edit-ebook/:id", async (req, res) => {
       const { id } = req.params;
-      const ebookData = await allEbook.updateOne({ _id: new ObjectId(id) }, { $set: req.body });
+      const ebookData = await allEbook.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: req.body },
+      );
       if (!ebookData) {
         return res.status(404).send("Ebook not found");
       }
-      res.json({ success: true, message: "Ebook data updated successfully", data: ebookData });
+      res.json({
+        success: true,
+        message: "Ebook data updated successfully",
+        data: ebookData,
+      });
       console.log(ebookData);
     });
     app.delete("/api/delete-ebook/:id", async (req, res) => {
@@ -82,7 +111,11 @@ async function run() {
       if (!ebookData) {
         return res.status(404).send("Ebook not found");
       }
-      res.json({ success: true, message: "Ebook data deleted successfully", data: ebookData });
+      res.json({
+        success: true,
+        message: "Ebook data deleted successfully",
+        data: ebookData,
+      });
       console.log(ebookData);
     });
   } catch (err) {
