@@ -1,4 +1,4 @@
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
 const dns = require("node:dns");
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
@@ -31,7 +31,7 @@ async function run() {
     console.log(allEbook);
     console.log("You successfully connected to MongoDB!");
     app.get("/", (req, res) => {
-      res.send(allUser);
+      res.send("hello world");
     });
     app.post("/api/add-ebook", async (req, res) => {
       const ebookData = req.body;
@@ -42,10 +42,48 @@ async function run() {
       res.json({ success: true, message: "Ebook data inserted successfully", result });
       console.log(result);
     });
-    app.get("/api/all-ebook", async (req, res) => {
+    app.get("/api/all-ebook", async (req, res) => { // all ebooks including unpublished ones for writer and admin 
       const ebookData = await allEbook.find({}).toArray();
-      res.json({ success: true, message: "Ebook data retrieved successfully", result: ebookData });
-      // console.log(result);
+      console.log(ebookData);
+      const AuthorId = await ebookData.FindOne({ _id: new ObjectId(ebookData.authorId) });
+      const AuthorEmail = await ebookData.FindOne(author })
+      res.json({ success: true, message: "Ebook data retrieved successfully", data: ebookData });
+      console.log(ebookData);
+    });
+    app.get("/api/all-ebooks", async (req, res) => { // all ebooks only published ones for public
+      const cursor = allEbook.find({
+        isPublished: true,
+      });
+      const ebookData = await cursor.toArray();
+      res.json({ success: true, message: "Ebook data retrieved successfully", data: ebookData });
+      console.log(ebookData);
+    });
+    app.get("/api/ebook/:id", async (req, res) => {
+      const { id } = req.params;
+      const ebookData = await allEbook.findOne({ _id: new ObjectId(id) });
+      if (!ebookData) {
+        return res.status(404).send("Ebook not found");
+      }
+      res.json({ success: true, message: "Ebook data retrieved successfully", data: ebookData });
+      console.log(ebookData);
+    });
+    app.put("/api/edit-ebook/:id", async (req, res) => {
+      const { id } = req.params;
+      const ebookData = await allEbook.updateOne({ _id: new ObjectId(id) }, { $set: req.body });
+      if (!ebookData) {
+        return res.status(404).send("Ebook not found");
+      }
+      res.json({ success: true, message: "Ebook data updated successfully", data: ebookData });
+      console.log(ebookData);
+    });
+    app.delete("/api/delete-ebook/:id", async (req, res) => {
+      const { id } = req.params;
+      const ebookData = await allEbook.deleteOne({ _id: new ObjectId(id) });
+      if (!ebookData) {
+        return res.status(404).send("Ebook not found");
+      }
+      res.json({ success: true, message: "Ebook data deleted successfully", data: ebookData });
+      console.log(ebookData);
     });
   } catch (err) {
     console.dir(err);
