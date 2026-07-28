@@ -26,9 +26,9 @@ async function run() {
     const db = await client.db("fable");
     const allUser = await db.collection("user");
     const allEbook = await db.collection("ebook");
-    // const allEbookCollection = await allEbook.find({}).toArray();
-    console.log(allUser);
-    console.log(allEbook);
+    const bookMarksCollection = await db
+      .collection("bookmarks")
+      .createIndex({ userId: 1, ebookId: 1 }, { unique: true });
     console.log("You successfully connected to MongoDB!");
     app.get("/", (req, res) => {
       res.send("hello world");
@@ -51,10 +51,12 @@ async function run() {
       const UserEmail = req.query.email;
       const UserId = req.query.id;
       console.log("user query", UserEmail);
-      const FilteredEbooks = await allEbook.find({
-        authorId: UserId,
-        authorEmail: UserEmail,
-      }).toArray();
+      const FilteredEbooks = await allEbook
+        .find({
+          authorId: UserId,
+          authorEmail: UserEmail,
+        })
+        .toArray();
       // console.log(FilteredEbooks);
       res.json({
         success: true,
@@ -105,6 +107,22 @@ async function run() {
       });
       console.log(ebookData);
     });
+    app.put("/api/edit-ebook/:id", async (req, res) => {
+      const { id } = req.params;
+      const ebookData = await allEbook.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: {} },
+      );
+      if (!ebookData) {
+        return res.status(404).send("Ebook not found");
+      }
+      res.json({
+        success: true,
+        message: "Ebook data updated successfully",
+        data: ebookData,
+      });
+      console.log(ebookData);
+    });
     app.delete("/api/delete-ebook/:id", async (req, res) => {
       const { id } = req.params;
       const ebookData = await allEbook.deleteOne({ _id: new ObjectId(id) });
@@ -118,6 +136,47 @@ async function run() {
       });
       console.log(ebookData);
     });
+    app.post("/api/toggle-bookmark/:userId", async (req, res) => {
+      const { userId } = req.params;
+      const {  id: ebookId } = req.body;
+      console.log("userId", userId, "ebookId", ebookId);
+      const bookMarks = db.collection("bookmarks");
+      const existing = await bookMarks.findOne({ userId, ebookId });
+      if(!ebookId){
+        return res.status(400).json({ success: false, message: "Ebook ID is required" });
+      }
+      if (existing) {
+        await bookMarks.deleteOne({ _id: existing._id });
+        return res.json({ success: true, bookmarked: false });
+      }
+      await bookMarks.insertOne({
+        userId,
+        ebookId,
+        bookmarked: true,
+        createdAt: new Date(),
+      });
+      return res.json({ success: true, bookmarked: true });
+    });
+    app.get("/api/bookmarks/:userId", async (req, res)=>{ // get all bookmarks for individual user 
+      const { userId } = req.params;
+      const bookMarks = db.collection("bookmarks");
+      const ebooks = db.collection("ebook");
+      const myBookmarks = await bookMarks.find({userId}).sort({ createdAt: -1 }).toArray();
+      const ebookDetails = await ebooks.find({ _id: { $in: myBookmarks.map(b => new ObjectId(b.ebookId)) } }).toArray();
+
+      res.json({
+        success: true, 
+        message: "Bookmarks retrieved successfully",
+        data: ebookDetails
+      })
+    })
+  app.get("/api/check/:userId/:ebookId", async (req, res) => {
+  const exists = await db.collection("bookmarks").findOne({
+    userId:  req.params.userId,
+    ebookId: req.params.ebookId,
+  });
+  res.json({ bookmarked: !!exists }); 
+});
   } catch (err) {
     console.dir(err);
   }
