@@ -43,7 +43,6 @@ async function run() {
       });
     });
 
-
     app.put("/api/edit-ebook/:id", async (req, res) => {
       const { id } = req.params;
       const ebookData = await allEbook.updateOne(
@@ -59,7 +58,6 @@ async function run() {
         data: ebookData,
       });
     });
-
 
     app.patch("/api/publish-ebook/:UserId", async (req, res) => {
       const { UserId } = req.params;
@@ -95,13 +93,11 @@ async function run() {
       res.json({ success: true, message: "Ebook published successfully" });
     });
 
-
     // For writer -----------------------------------------------------------
-
 
     // For Writer and Admin ---------------------------------------------------
     app.get("/api/all-ebook", async (req, res) => {
-      // all ebooks including unpublished ones for writer and admin
+      // all ebooks including unpublished ones for writer
       const UserEmail = req.query.email;
       const UserId = req.query.id;
       const FilteredEbooks = await allEbook
@@ -130,10 +126,8 @@ async function run() {
       });
     });
 
-      
-
     // For Admin ----------------------------------------------------
-    app.get("/api/all-users/:userId", async (req, res) => {
+    app.get("/api/admin/all-users/:userId", async (req, res) => {
       const { userId } = req.params;
       const isAdmin = await allUser.findOne({
         _id: new ObjectId(userId),
@@ -156,7 +150,7 @@ async function run() {
     });
 
     // Ban or Unban a user (toggle)
-    app.patch("/api/ban-user/:adminId", async (req, res) => {
+    app.patch("/api/admin/ban-user/:adminId", async (req, res) => {
       const { adminId } = req.params;
       const { userId } = req.body;
       // Verify admin
@@ -178,21 +172,30 @@ async function run() {
           message: "User not found",
         });
       }
-      const newBanStatus = !targetUser.banned;
+      if (targetUser.isBanned) {
+        const UnBan = await allUser.updateOne(
+          { _id: new ObjectId(userId) },
+          { $set: { isBanned: false } },
+        );
+        return res.json({
+          success: true,
+          message: "User UnBanned successfully",
+        });
+      }
+      const newBanStatus = !targetUser.isBanned;
       await allUser.updateOne(
         { _id: new ObjectId(userId) },
-        { $set: { banned: newBanStatus } },
+        { $set: { isBanned: true } },
       );
+      await db.collection("session").deleteMany({ userId: targetUser });
       res.json({
         success: true,
-        message: newBanStatus
-          ? "User banned successfully"
-          : "User unbanned successfully",
+        message: "User banned successfully",
       });
     });
 
     // Change user role
-    app.patch("/api/change-role/:adminId", async (req, res) => {
+    app.patch("/api/admin/change-role/:adminId", async (req, res) => {
       const { adminId } = req.params;
       const { userId, role } = req.body;
       // Verify admin
@@ -223,6 +226,75 @@ async function run() {
       });
     });
 
+    // a specific api for admin only
+    app.get("/api/admin/manage-ebook/:adminId", async (req, res) => {
+      const { adminId } = req.params;
+      const isAdmin = allUser.findOne({
+        _id: new ObjectId(adminId),
+      });
+      if (!isAdmin) {
+        return {
+          success: false,
+          message: "You are not authorized for this action ",
+        };
+      }
+      // const allEbooks = await allEbook;
+      const allEbooks = await allEbook.find({}).toArray();
+      res.json({
+        success: true,
+        message: "Ebook data retrieved successfully",
+        data: allEbooks,
+      });
+    });
+    app.patch("/api/admin/manage-ebook/publish-unpublish", async (req, res) => {
+      const { ebookId, adminId } = req.body;
+      // const {adminId} = req.params;
+      const isAdmin = allUser.findOne({
+        _id: new ObjectId(adminId),
+      });
+      if (!isAdmin) {
+        return {
+          success: false,
+          message: "You are not authorized for this action ",
+        };
+      }
+      const isAlreadyPublished = await allEbook.findOne({
+        _id: new ObjectId(ebookId),
+        isPublished: true,
+      });
+      if (isAlreadyPublished) {
+        const UpdateResults = await allEbook.updateOne(
+          { _id: new ObjectId(ebookId) },
+          { $set: { isPublished: false } },
+        );
+        return res.json({
+          success: true,
+          message: "Ebook unpublished successfully",
+        });
+      }
+      const ebookData = await allEbook.updateOne(
+        { _id: new ObjectId(ebookId) },
+        { $set: { isPublished: true } },
+      );
+      res.json({
+        success: true,
+        message: "Ebook data retrieved successfully",
+        data: ebookData,
+      });
+    });
+
+    app.delete("/api/admin/manage-ebook/delete", async (req, res) => {
+      const { id: ebookId, adminId } = req.body;
+      const ebookData = await allEbook.deleteOne({ _id: new ObjectId(ebookId) });
+      if (!ebookData) {
+        return res.status(404).send("Ebook not found");
+      }
+      res.json({
+        success: true,
+        message: "Ebook data deleted successfully",
+        data: ebookData,
+      });
+    });
 
     // For Public ----------------------------------------------------
     app.get("/api/all-ebooks", async (req, res) => {
@@ -250,8 +322,6 @@ async function run() {
         data: ebookData,
       });
     });
-
-    
 
     // For public bookmark toggle and get bookmarks -------------------------------------
     app.post("/api/toggle-bookmark/:userId", async (req, res) => {
