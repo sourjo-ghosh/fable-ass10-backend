@@ -11,6 +11,8 @@ app.use(express.json());
 const port = process.env.PORT || 8000;
 // const client = new MongoClient();
 const uri = process.env.MONGODB_URI;
+const Stripe = require("stripe");
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -29,6 +31,7 @@ async function run() {
     const bookMarksCollection = await db
       .collection("bookmarks")
       .createIndex({ userId: 1, ebookId: 1 }, { unique: true });
+    const paymentCollection = db.collection("payment");
     // For Writer ----------------------------------------------
     app.post("/api/add-ebook", async (req, res) => {
       const ebookData = req.body;
@@ -285,7 +288,9 @@ async function run() {
 
     app.delete("/api/admin/manage-ebook/delete", async (req, res) => {
       const { id: ebookId, adminId } = req.body;
-      const ebookData = await allEbook.deleteOne({ _id: new ObjectId(ebookId) });
+      const ebookData = await allEbook.deleteOne({
+        _id: new ObjectId(ebookId),
+      });
       if (!ebookData) {
         return res.status(404).send("Ebook not found");
       }
@@ -375,6 +380,96 @@ async function run() {
     });
     app.listen(port, () => {
       console.log(`Example app listening on port ${port}`);
+    });
+
+    // payments
+    app.post("/api/create-checkout-session", async (req, res) => {
+      try {
+        const { ebookId, userId } = req.body;
+
+        // find the product form allEbook collection
+        const product = await allEbook.findOne({
+          _id: new ObjectId(ebookId),
+        });
+
+        if (!product) {
+          return res.status(404).json({
+            success: false,
+            message: "Product not found",
+          });
+        }
+
+        const session = await stripe.checkout.sessions.create({
+          mode: "payment",
+
+          payment_method_types: ["card"],
+
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+
+                product_data: {
+                  name: product.title,
+                },
+
+                unit_amount: product.price * 100,
+              },
+
+              quantity: 1,
+            },
+          ],
+
+          // success_url: "http://localhost:3000/payment-success",
+          success_url: `${process.env.CLIENT_URL}/payment-success`,
+
+          // cancel_url: "http://localhost:3000/payment-cancel",
+          cancel_url: `${process.env.CLIENT_URL}/payment-cancel`,
+
+          metadata: {
+            ebookId,
+            userId,
+          },
+        });
+
+        res.json({
+          success: true,
+          url: session.url,
+        });
+      } catch (err) {
+        console.error(err);
+
+        res.status(500).json({
+          success: false,
+          message: err.message,
+        });
+      }
+    });
+    app.post("/api/stripe/webhook", async (req, res) => {
+      const event = req.body;
+
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+
+        const paymentInfo = {
+          userId: session.metadata.userId,
+          ebookId: session.metadata.ebookId,
+
+          paymentIntentId: session.payment_intent,
+          checkoutSessionId: session.id,
+
+          amount: session.amount_total,
+          currency: session.currency,
+
+          paymentStatus: session.payment_status,
+
+          createdAt: new Date(),
+        };
+
+        await paymentCollection.insertOne(paymentInfo);
+      }
+
+      res.sendStatus(200);
     });
   } catch (err) {
     console.dir(err);
