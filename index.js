@@ -378,10 +378,6 @@ async function run() {
       });
       res.json({ bookmarked: !!exists });
     });
-    app.listen(port, () => {
-      console.log(`Example app listening on port ${port}`);
-    });
-
     // payments
     app.post("/api/create-checkout-session", async (req, res) => {
       try {
@@ -420,10 +416,7 @@ async function run() {
             },
           ],
 
-          // success_url: "http://localhost:3000/payment-success",
           success_url: `${process.env.CLIENT_URL}/payment-success`,
-
-          // cancel_url: "http://localhost:3000/payment-cancel",
           cancel_url: `${process.env.CLIENT_URL}/payment-cancel`,
 
           metadata: {
@@ -470,6 +463,9 @@ async function run() {
       }
 
       res.sendStatus(200);
+    });
+    app.listen(port, () => {
+      console.log(`Example app listening on port ${port}`);
     });
   } catch (err) {
     console.dir(err);
