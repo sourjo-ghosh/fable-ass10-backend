@@ -416,8 +416,8 @@ async function run() {
             },
           ],
 
-          success_url: `${process.env.CLIENT_URL}/payment-success`,
-          cancel_url: `${process.env.CLIENT_URL}/payment-cancel`,
+          success_url: `${process.env.CLIENT_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.CLIENT_URL}/payment-cancel?ebookId=${ebookId}`,
 
           metadata: {
             ebookId,
@@ -428,6 +428,7 @@ async function run() {
         res.json({
           success: true,
           url: session.url,
+          session: session,
         });
       } catch (err) {
         console.error(err);
@@ -463,6 +464,53 @@ async function run() {
       }
 
       res.sendStatus(200);
+    });
+    app.get("/api/payment-success/:sessionId", async (req, res) => {
+      try {
+        const { sessionId } = req.params;
+
+        const payment = await paymentCollection.findOne({
+          checkoutSessionId: sessionId,
+        });
+
+        if (!payment) {
+          return res.status(404).send({
+            success: false,
+            message: "Payment not found",
+          });
+        }
+
+        const ebook = await allEbook.findOne({
+          _id: new ObjectId(payment.ebookId),
+        });
+
+        if (!ebook) {
+          return res.status(404).send({
+            success: false,
+            message: "Ebook not found",
+          });
+        }
+
+        return res.send({
+          success: true,
+          payment: {
+            amount: payment.amount,
+            currency: payment.currency,
+            status: payment.paymentStatus,
+            paymentIntentId: payment.paymentIntentId,
+            checkoutSessionId: payment.checkoutSessionId,
+            createdAt: payment.createdAt,
+          },
+          ebook,
+        });
+      } catch (error) {
+        console.error(error);
+
+        res.status(500).send({
+          success: false,
+          message: "Internal Server Error",
+        });
+      }
     });
     app.listen(port, () => {
       console.log(`Example app listening on port ${port}`);
