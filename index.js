@@ -100,18 +100,22 @@ async function run() {
           message: "User ID is required",
         });
       }
-      const payments = await paymentCollection.find({
-        userId: userId,
-        paymentStatus: "paid"
-      }).toArray();
+      const payments = await paymentCollection
+        .find({
+          userId: userId,
+          paymentStatus: "paid",
+        })
+        .toArray();
       const results = [];
       for (const payment of payments) {
-        const ebook = await allEbook.findOne({ _id: new ObjectId(payment.ebookId) });
+        const ebook = await allEbook.findOne({
+          _id: new ObjectId(payment.ebookId),
+        });
         if (ebook) {
           results.push({
             _id: ebook._id,
             coverImage: ebook.coverImage,
-            ebookTitle: ebook.title
+            ebookTitle: ebook.title,
           });
         }
       }
@@ -119,8 +123,47 @@ async function run() {
         success: true,
         message: "Purchased books retrieved successfully",
         data: results,
-      })
-    })
+      });
+    });
+    app.get("/api/user/purchased-history/:userId", async (req, res) => {
+      const { userId } = req.params;
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: "User ID is required",
+        });
+      }
+      const payments = await paymentCollection
+        .find({
+          userId: userId,
+          paymentStatus: "paid",
+        })
+        .sort({ createdAt: -1 })
+        .toArray();
+      const history = [];
+      for (const payment of payments) {
+        const ebook = await allEbook.findOne({
+          _id: new ObjectId(payment.ebookId),
+        });
+        if (ebook) {
+          history.push({
+            _id: ebook._id,
+            title: ebook.title,
+            author: ebook.authorName,
+            price: ebook.price,
+            date: payment.createdAt,
+            status: payment.paymentStatus,
+            coverImage: ebook.coverImage,
+            ebookTitle: ebook.title,
+          });
+        }
+      }
+      res.json({
+        success: true,
+        message: "Purchased books retrieved successfully",
+        data: history,
+      });
+    });
     // For writer -----------------------------------------------------------
 
     // For Writer and Admin ---------------------------------------------------
@@ -151,6 +194,54 @@ async function run() {
         success: true,
         message: "Ebook data deleted successfully",
         data: ebookData,
+      });
+    });
+    app.get("/api/writer/sales-history/:userId", async (req, res) => {
+      const { userId } = req.params;
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: "User ID is required",
+        });
+      }
+      const isWriter = await allUser.findOne({
+        _id: new ObjectId(userId),
+        role: "writer",
+      });
+      if (!isWriter) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not authorized to view sales history",
+        });
+      }
+      const writerEbooks = await allEbook.find({
+        authorId: userId,
+      }).toArray();
+      const writerEbookIds = writerEbooks.map((ebook) => ebook._id.toString());
+      const sales = await paymentCollection.find({
+        ebookId: {$in: writerEbookIds},
+        paymentStatus: "paid",
+      })
+      .sort({ createdAt: -1 })
+      .toArray();
+      const history = [];
+      for (const sale of sales){
+        const originalEbook = writerEbooks.find((ebook) => ebook._id.toString() === sale.ebookId); 
+        const buyer = await allUser.findOne({_id: new ObjectId(sale.userId)});
+        if(originalEbook){
+          history.push({
+            id: originalEbook._id,
+            title: originalEbook.title,
+            buyer: buyer.name,
+            date: sale.createdAt,
+            amount: sale.amount,
+          })
+        }
+      }
+      res.json({
+        success: true,
+        message: "Purchased books retrieved successfully",
+        data: history,
       });
     });
 
