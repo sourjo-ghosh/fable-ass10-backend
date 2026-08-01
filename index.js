@@ -25,12 +25,9 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
-    const db = await client.db("fable");
-    const allUser = await db.collection("user");
-    const allEbook = await db.collection("ebook");
-    const bookMarksCollection = await db
-      .collection("bookmarks")
-      .createIndex({ userId: 1, ebookId: 1 }, { unique: true });
+    const db = client.db("fable");
+    const allUser = db.collection("user");
+    const allEbook = db.collection("ebook");
     const paymentCollection = db.collection("payment");
     // For Writer ----------------------------------------------
     app.post("/api/add-ebook", async (req, res) => {
@@ -95,7 +92,35 @@ async function run() {
       );
       res.json({ success: true, message: "Ebook published successfully" });
     });
-
+    app.get("/api/user/purchased-books/:userId", async (req, res) => {
+      const { userId } = req.params;
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: "User ID is required",
+        });
+      }
+      const payments = await paymentCollection.find({
+        userId: userId,
+        paymentStatus: "paid"
+      }).toArray();
+      const results = [];
+      for (const payment of payments) {
+        const ebook = await allEbook.findOne({ _id: new ObjectId(payment.ebookId) });
+        if (ebook) {
+          results.push({
+            _id: ebook._id,
+            coverImage: ebook.coverImage,
+            ebookTitle: ebook.title
+          });
+        }
+      }
+      res.json({
+        success: true,
+        message: "Purchased books retrieved successfully",
+        data: results,
+      })
+    })
     // For writer -----------------------------------------------------------
 
     // For Writer and Admin ---------------------------------------------------
@@ -331,12 +356,18 @@ async function run() {
             message: "Ebook not found",
           });
         }
-
+        if (ebook.authorId?.toString() === userId?.toString()) {
+          return res.json({
+            success: true,
+            isPurchased: true, // Frontend treats them as an authorized reader
+            data: ebook, // Full data containing the premium content
+          });
+        }
         // 2. Safely check if the user has a completed payment for this book
         // Using string matching or ObjectId matching based on your database storage schema
         const purchased = await paymentCollection.findOne({
           userId: userId,
-          productId: id,
+          ebookId: id,
           paymentStatus: "paid",
         });
 
@@ -378,7 +409,7 @@ async function run() {
           .json({ success: false, message: "Ebook ID is required" });
       }
       const IsAdmin = await allUser.findOne({ _id: { userId } });
-      if (!IsAdmin) {
+      if (IsAdmin) {
         return res.json({
           success: false,
           message: "You can't do this actions",
