@@ -316,36 +316,11 @@ async function run() {
       });
     });
     // For public single ebook details
-    // app.get("/api/ebook/:id", async (req, res) => {
-    //   const { id, userId } = req.params;
-    //   const ebookData = await allEbook.findOne(
-    //     { _id: new ObjectId(id) },
-    //     { projection: { content: 0 } },
-    //   );
-    //   const IsPurchased = await paymentCollection.findOne({
-    //     userId: userId,
-    //     ebookId: id,
-    //   });
-    //   if (IsPurchased) {
-    //     return res.json({
-    //       success: true,
-    //       message: "Ebook data retrieved successfully",
-    //       data: ebookData,
-    //     });
-    //   }
-    //   if (!ebookData) {
-    //     return res.status(404).send("Ebook not found");
-    //   }
-    //   res.json({
-    //     success: true,
-    //     message: "Ebook data retrieved successfully",
-    //     data: ebookData,
-    //     isPurchased: !!IsPurchased,
-    //   });
-    // });
     app.get("/api/ebook/:id/:userId", async (req, res) => {
       try {
         const { id, userId } = req.params;
+
+        // 1. Fetch the ebook from the database
         const ebook = await allEbook.findOne({
           _id: new ObjectId(id),
         });
@@ -357,18 +332,21 @@ async function run() {
           });
         }
 
-        // Payment check
+        // 2. Safely check if the user has a completed payment for this book
+        // Using string matching or ObjectId matching based on your database storage schema
         const purchased = await paymentCollection.findOne({
-          userId,
+          userId: userId,
           productId: id,
           paymentStatus: "paid",
         });
 
+        // 3. Handle the payload distribution conditionally
         if (purchased) {
+          // User paid: Send the full data including sensitive reading material
           return res.json({
             success: true,
             isPurchased: true,
-            data: ebook, // Full ebook
+            data: ebook,
           });
         }
 
@@ -377,17 +355,17 @@ async function run() {
         return res.json({
           success: true,
           isPurchased: false,
-          data: preview,
+          data: preview, // Sends everything EXCEPT the content field
         });
       } catch (err) {
-        console.log(err);
-
+        console.error(err);
         res.status(500).json({
           success: false,
           message: err.message,
         });
       }
     });
+
     // For public bookmark toggle and get bookmarks -------------------------------------
     app.post("/api/toggle-bookmark/:userId", async (req, res) => {
       const { userId } = req.params;
@@ -462,14 +440,34 @@ async function run() {
         const product = await allEbook.findOne({
           _id: new ObjectId(ebookId),
         });
-
         if (!product) {
           return res.status(404).json({
             success: false,
             message: "Product not found",
           });
         }
+        if (product.status === "sold") {
+          return res.status(400).json({
+            success: false,
+            message: "This ebook is sold out",
+          });
+        }
+        const user = await allUser.findOne({
+          _id: new ObjectId(userId),
+        });
 
+        if (user && (user.role === "admin" || user.role === "writer")) {
+          return res.status(403).json({
+            success: false,
+            message: "Creators Cannot Buy",
+          });
+        }
+        if (product.authorId?.toString() === userId?.toString()) {
+          return res.status(403).json({
+            success: false,
+            message: "You cannot purchase your own book",
+          });
+        }
         const session = await stripe.checkout.sessions.create({
           mode: "payment",
 
