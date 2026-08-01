@@ -304,9 +304,10 @@ async function run() {
     // For Public ----------------------------------------------------
     app.get("/api/all-ebooks", async (req, res) => {
       // all ebooks only published ones for public
-      const cursor = allEbook.find({
-        isPublished: true,
-      });
+      const cursor = allEbook.find(
+        { isPublished: true },
+        { projection: { content: 0 } },
+      );
       const ebookData = await cursor.toArray();
       res.json({
         success: true,
@@ -315,19 +316,78 @@ async function run() {
       });
     });
     // For public single ebook details
-    app.get("/api/ebook/:id", async (req, res) => {
-      const { id } = req.params;
-      const ebookData = await allEbook.findOne({ _id: new ObjectId(id) });
-      if (!ebookData) {
-        return res.status(404).send("Ebook not found");
-      }
-      res.json({
-        success: true,
-        message: "Ebook data retrieved successfully",
-        data: ebookData,
-      });
-    });
+    // app.get("/api/ebook/:id", async (req, res) => {
+    //   const { id, userId } = req.params;
+    //   const ebookData = await allEbook.findOne(
+    //     { _id: new ObjectId(id) },
+    //     { projection: { content: 0 } },
+    //   );
+    //   const IsPurchased = await paymentCollection.findOne({
+    //     userId: userId,
+    //     ebookId: id,
+    //   });
+    //   if (IsPurchased) {
+    //     return res.json({
+    //       success: true,
+    //       message: "Ebook data retrieved successfully",
+    //       data: ebookData,
+    //     });
+    //   }
+    //   if (!ebookData) {
+    //     return res.status(404).send("Ebook not found");
+    //   }
+    //   res.json({
+    //     success: true,
+    //     message: "Ebook data retrieved successfully",
+    //     data: ebookData,
+    //     isPurchased: !!IsPurchased,
+    //   });
+    // });
+    app.get("/api/ebook/:id/:userId", async (req, res) => {
+      try {
+        const { id, userId } = req.params;
+        const ebook = await allEbook.findOne({
+          _id: new ObjectId(id),
+        });
 
+        if (!ebook) {
+          return res.status(404).json({
+            success: false,
+            message: "Ebook not found",
+          });
+        }
+
+        // Payment check
+        const purchased = await paymentCollection.findOne({
+          userId,
+          productId: id,
+          paymentStatus: "paid",
+        });
+
+        if (purchased) {
+          return res.json({
+            success: true,
+            isPurchased: true,
+            data: ebook, // Full ebook
+          });
+        }
+
+        const { content, ...preview } = ebook;
+
+        return res.json({
+          success: true,
+          isPurchased: false,
+          data: preview,
+        });
+      } catch (err) {
+        console.log(err);
+
+        res.status(500).json({
+          success: false,
+          message: err.message,
+        });
+      }
+    });
     // For public bookmark toggle and get bookmarks -------------------------------------
     app.post("/api/toggle-bookmark/:userId", async (req, res) => {
       const { userId } = req.params;
@@ -339,9 +399,20 @@ async function run() {
           .status(400)
           .json({ success: false, message: "Ebook ID is required" });
       }
+      const IsAdmin = await allUser.findOne({ _id: { userId } });
+      if (!IsAdmin) {
+        return res.json({
+          success: false,
+          message: "You can't do this actions",
+        });
+      }
       if (existing) {
         await bookMarks.deleteOne({ _id: existing._id });
-        return res.json({ success: true, bookmarked: false });
+        return res.json({
+          success: true,
+          bookmarked: false,
+          message: "BookMark removed",
+        });
       }
       await bookMarks.insertOne({
         userId,
@@ -349,7 +420,11 @@ async function run() {
         bookmarked: true,
         createdAt: new Date(),
       });
-      return res.json({ success: true, bookmarked: true });
+      return res.json({
+        success: true,
+        bookmarked: true,
+        message: "BookMark added",
+      });
     });
     app.get("/api/bookmarks/:userId", async (req, res) => {
       // get all bookmarks for individual user
@@ -441,7 +516,9 @@ async function run() {
     });
     app.post("/api/stripe/webhook", async (req, res) => {
       const event = req.body;
-
+      console.log("========== WEBHOOK ==========");
+      console.log(req.body);
+      console.log("=============================");
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
 
@@ -459,7 +536,10 @@ async function run() {
 
           createdAt: new Date(),
         };
-
+        const markEbookSold = await allEbook.updateOne(
+          { _id: new ObjectId(session.metadata.ebookId) },
+          { $set: { status: "sold" } },
+        );
         await paymentCollection.insertOne(paymentInfo);
       }
 
@@ -520,10 +600,6 @@ async function run() {
   }
 }
 
-// Call this only when your application terminates
-// async function disconnectFromMongoDB() {
-//   await client.close();
-// }
 run().catch(console.dir);
 
 app.get("/", (req, res) => {
