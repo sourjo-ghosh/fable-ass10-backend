@@ -682,6 +682,7 @@ async function run() {
           metadata: {
             ebookId,
             userId,
+            paymentType: "ebook_purchase",
           },
         });
 
@@ -698,37 +699,6 @@ async function run() {
           message: err.message,
         });
       }
-    });
-    app.post("/api/stripe/webhook", async (req, res) => {
-      const event = req.body;
-      console.log("========== WEBHOOK ==========");
-      console.log(req.body);
-      console.log("=============================");
-      if (event.type === "checkout.session.completed") {
-        const session = event.data.object;
-
-        const paymentInfo = {
-          userId: session.metadata.userId,
-          ebookId: session.metadata.ebookId,
-
-          paymentIntentId: session.payment_intent,
-          checkoutSessionId: session.id,
-
-          amount: session.amount_total,
-          currency: session.currency,
-
-          paymentStatus: session.payment_status,
-
-          createdAt: new Date(),
-        };
-        const markEbookSold = await allEbook.updateOne(
-          { _id: new ObjectId(session.metadata.ebookId) },
-          { $set: { status: "sold" } },
-        );
-        await paymentCollection.insertOne(paymentInfo);
-      }
-
-      res.sendStatus(200);
     });
     app.get("/api/payment-success/:sessionId", async (req, res) => {
       try {
@@ -841,39 +811,63 @@ async function run() {
     });
     app.post("/api/stripe/webhook", async (req, res) => {
       const event = req.body;
-
       console.log("========== WEBHOOK ==========");
       console.log(req.body);
       console.log("=============================");
-
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
-        console.log("Metadata:", JSON.stringify(session.metadata, null, 2));
-        const paymentInfo = {
-          userId: session.metadata.userId,
+        if (session.metadata.paymentType === "ebook_purchase") {
+          // ebook purchase logic
+          const paymentInfo = {
+            userId: session.metadata.userId,
+            ebookId: session.metadata.ebookId,
 
-          paymentIntentId: session.payment_intent,
-          checkoutSessionId: session.id,
+            paymentIntentId: session.payment_intent,
+            checkoutSessionId: session.id,
 
-          amount: session.amount_total,
-          currency: session.currency,
+            amount: session.amount_total,
+            currency: session.currency,
 
-          paymentStatus: session.payment_status,
+            paymentStatus: session.payment_status,
 
-          paymentType: "writer_verification",
+            paymentType: session.metadata.paymentType,
 
-          createdAt: new Date(),
-        };
+            createdAt: new Date(),
+          };
+          const markEbookSold = await allEbook.updateOne(
+            { _id: new ObjectId(session.metadata.ebookId) },
+            { $set: { status: "sold" } },
+          );
+          await paymentCollection.insertOne(paymentInfo);
+        }
+        if (session.metadata.paymentType === "writer_verification") {
+          // writer verification logic
+          const paymentInfo = {
+            userId: session.metadata.userId,
 
-        // Payment history save
-        await paymentCollection.insertOne(paymentInfo);
+            paymentIntentId: session.payment_intent,
+            checkoutSessionId: session.id,
 
-        await allUser.updateOne(
-          {
-            _id: new ObjectId(session.metadata.userId),
-          },
-          { $set: { emailVerified: true } },
-        );
+            amount: session.amount_total,
+            currency: session.currency,
+
+            paymentStatus: session.payment_status,
+
+            paymentType: session.metadata.paymentType,
+
+            createdAt: new Date(),
+          };
+
+          // Payment history save
+          await paymentCollection.insertOne(paymentInfo);
+
+          await allUser.updateOne(
+            {
+              _id: new ObjectId(session.metadata.userId),
+            },
+            { $set: { emailVerified: true } },
+          );
+        }
       }
 
       res.sendStatus(200);
