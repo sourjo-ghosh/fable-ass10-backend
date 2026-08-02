@@ -31,7 +31,7 @@ async function run() {
     const paymentCollection = db.collection("payment");
     // For Writer ----------------------------------------------
     app.post("/api/set-writer-status", async (req, res) => {
-      const {userId} = req.body;
+      const { userId } = req.body;
       if (!userId) {
         return res.status(400).json({
           success: false,
@@ -41,14 +41,14 @@ async function run() {
       const IsWriter = await allUser.findOne({
         _id: new ObjectId(userId),
         role: "writer",
-      })
+      });
       if (!IsWriter) {
         return res.status(400).json({
           success: false,
           message: "User is not a writer",
         });
       }
-    const setWriterStatus = await allUser.updateOne(
+      const setWriterStatus = await allUser.updateOne(
         { _id: new ObjectId(userId) },
         { $set: { writerVerificationStatus: false } },
       );
@@ -780,7 +780,7 @@ async function run() {
     app.post("/api/verify-writer", async (req, res) => {
       try {
         const { userId } = req.body;
-
+        console.log("User ID:", userId);
         // find the product form allEbook collection
         const user = await allUser.findOne({
           _id: new ObjectId(userId),
@@ -848,7 +848,7 @@ async function run() {
 
       if (event.type === "checkout.session.completed") {
         const session = event.data.object;
-
+        console.log("Metadata:", JSON.stringify(session.metadata, null, 2));
         const paymentInfo = {
           userId: session.metadata.userId,
 
@@ -868,14 +868,11 @@ async function run() {
         // Payment history save
         await paymentCollection.insertOne(paymentInfo);
 
-    
         await allUser.updateOne(
           {
             _id: new ObjectId(session.metadata.userId),
           },
-          {
-            emailVerified: true,
-          },
+          { $set: { emailVerified: true } },
         );
       }
 
