@@ -30,6 +30,33 @@ async function run() {
     const allEbook = db.collection("ebook");
     const paymentCollection = db.collection("payment");
     // For Writer ----------------------------------------------
+    app.post("/api/set-writer-status", async (req, res) => {
+      const {userId} = req.body;
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: "User ID is required",
+        });
+      }
+      const IsWriter = await allUser.findOne({
+        _id: new ObjectId(userId),
+        role: "writer",
+      })
+      if (!IsWriter) {
+        return res.status(400).json({
+          success: false,
+          message: "User is not a writer",
+        });
+      }
+    const setWriterStatus = await allUser.updateOne(
+        { _id: new ObjectId(userId) },
+        { $set: { writerVerificationStatus: false } },
+      );
+      res.json({
+        success: true,
+        message: "Writer status updated successfully",
+      });
+    });
     app.post("/api/add-ebook", async (req, res) => {
       const ebookData = req.body;
       if (!ebookData) {
@@ -214,28 +241,33 @@ async function run() {
           message: "You are not authorized to view sales history",
         });
       }
-      const writerEbooks = await allEbook.find({
-        authorId: userId,
-      }).toArray();
+      const writerEbooks = await allEbook
+        .find({
+          authorId: userId,
+        })
+        .toArray();
       const writerEbookIds = writerEbooks.map((ebook) => ebook._id.toString());
-      const sales = await paymentCollection.find({
-        ebookId: {$in: writerEbookIds},
-        paymentStatus: "paid",
-      })
-      .sort({ createdAt: -1 })
-      .toArray();
+      const sales = await paymentCollection
+        .find({
+          ebookId: { $in: writerEbookIds },
+          paymentStatus: "paid",
+        })
+        .sort({ createdAt: -1 })
+        .toArray();
       const history = [];
-      for (const sale of sales){
-        const originalEbook = writerEbooks.find((ebook) => ebook._id.toString() === sale.ebookId); 
-        const buyer = await allUser.findOne({_id: new ObjectId(sale.userId)});
-        if(originalEbook){
+      for (const sale of sales) {
+        const originalEbook = writerEbooks.find(
+          (ebook) => ebook._id.toString() === sale.ebookId,
+        );
+        const buyer = await allUser.findOne({ _id: new ObjectId(sale.userId) });
+        if (originalEbook) {
           history.push({
             id: originalEbook._id,
             title: originalEbook.title,
             buyer: buyer.name,
             date: sale.createdAt,
             amount: sale.amount,
-          })
+          });
         }
       }
       res.json({
@@ -415,6 +447,39 @@ async function run() {
         message: "Ebook data deleted successfully",
         data: ebookData,
       });
+    });
+
+    app.get("/api/admin/all-transactions", async (req, res) => {
+      try {
+        // 1. Fetch every single transaction record from your database
+        const transactions = await paymentCollection
+          .find({})
+          .sort({ createdAt: -1 })
+          .toArray();
+        const resultList = [];
+
+        // 2. Loop through each payment record to attach details
+        for (const tx of transactions) {
+          // Find the user/writer document to get their email
+          const account = await allUser.findOne({
+            _id: new ObjectId(tx.userId),
+          });
+
+          resultList.push({
+            transactionId: tx._id,
+            // If 'type' is saved in your DB use it, otherwise fall back based on price/metadata
+            type: tx.type || "purchase",
+            email: account ? account.email : "Unknown Account",
+            amount: tx.amount ? (tx.amount / 100).toFixed(2) : "0.00",
+            date: tx.createdAt,
+          });
+        }
+
+        res.json({ success: true, data: resultList });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: err.message });
+      }
     });
 
     // For Public ----------------------------------------------------
@@ -711,6 +776,110 @@ async function run() {
           message: "Internal Server Error",
         });
       }
+    });
+    app.post("/api/verify-writer", async (req, res) => {
+      try {
+        const { userId } = req.body;
+
+        // find the product form allEbook collection
+        const user = await allUser.findOne({
+          _id: new ObjectId(userId),
+        });
+        if (!user) {
+          return res.status(404).json({
+            success: false,
+            message: "User not found",
+          });
+        }
+        if (user.role !== "writer") {
+          return res.status(403).json({
+            success: false,
+            message: "Only writers can perform this action",
+          });
+        }
+        const session = await stripe.checkout.sessions.create({
+          mode: "payment",
+
+          payment_method_types: ["card"],
+
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+
+                product_data: {
+                  name: "Writer Verification Fee",
+                },
+
+                unit_amount: 10 * 100,
+              },
+
+              quantity: 1,
+            },
+          ],
+
+          success_url: `${process.env.CLIENT_URL}/dashboard/my-profile`,
+          cancel_url: `${process.env.CLIENT_URL}/dashboard/my-profile/`,
+          metadata: {
+            userId,
+            paymentType: "writer_verification",
+          },
+        });
+
+        res.json({
+          success: true,
+          url: session.url,
+        });
+      } catch (err) {
+        console.error(err);
+
+        res.status(500).json({
+          success: false,
+          message: err.message,
+        });
+      }
+    });
+    app.post("/api/stripe/webhook", async (req, res) => {
+      const event = req.body;
+
+      console.log("========== WEBHOOK ==========");
+      console.log(req.body);
+      console.log("=============================");
+
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+
+        const paymentInfo = {
+          userId: session.metadata.userId,
+
+          paymentIntentId: session.payment_intent,
+          checkoutSessionId: session.id,
+
+          amount: session.amount_total,
+          currency: session.currency,
+
+          paymentStatus: session.payment_status,
+
+          paymentType: "writer_verification",
+
+          createdAt: new Date(),
+        };
+
+        // Payment history save
+        await paymentCollection.insertOne(paymentInfo);
+
+    
+        await allUser.updateOne(
+          {
+            _id: new ObjectId(session.metadata.userId),
+          },
+          {
+            emailVerified: true,
+          },
+        );
+      }
+
+      res.sendStatus(200);
     });
     app.listen(port, () => {
       console.log(`Example app listening on port ${port}`);
