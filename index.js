@@ -30,39 +30,42 @@ async function run() {
     const allEbook = db.collection("ebook");
     const paymentCollection = db.collection("payment");
     // For Writer ----------------------------------------------
-    app.post("/api/set-writer-status", async (req, res) => {
-      const { userId } = req.body;
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          message: "User ID is required",
-        });
-      }
-      const IsWriter = await allUser.findOne({
+    app.post("/api/add-ebook", async (req, res) => {
+      const {bookData, userId} = req.body;
+      const is_real_writer = await allUser.findOne({
         _id: new ObjectId(userId),
         role: "writer",
       });
-      if (!IsWriter) {
-        return res.status(400).json({
+      if (!is_real_writer) {
+        return res.status(403).json({
           success: false,
-          message: "User is not a writer",
+          message: "You are not authorized to add an ebook",
         });
       }
-      const setWriterStatus = await allUser.updateOne(
-        { _id: new ObjectId(userId) },
-        { $set: { writerVerificationStatus: false } },
-      );
-      res.json({
-        success: true,
-        message: "Writer status updated successfully",
+      const IsVerifiedWriter = await allUser.findOne({
+        _id: new ObjectId(userId),
+        emailVerified: true,
       });
-    });
-    app.post("/api/add-ebook", async (req, res) => {
-      const ebookData = req.body;
-      if (!ebookData) {
+      if (!IsVerifiedWriter) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not a verified writer. Please verify your account to add an ebook.",
+        });
+      }
+      const isAlreadyExists = await allEbook.findOne({
+        title: bookData.title,
+        authorId: userId,
+      });
+      if (isAlreadyExists) {
+        return res.status(400).json({
+          success: false,
+          message: "An ebook with this title already exists",
+        });
+      }
+      if (!bookData) {
         return res.status(400).send("Ebook data is required");
       }
-      const result = await allEbook.insertOne(ebookData);
+      const result = await allEbook.insertOne(bookData);
       res.json({
         success: true,
         message: "Ebook data inserted successfully",
@@ -198,6 +201,17 @@ async function run() {
       // all ebooks including unpublished ones for writer
       const UserEmail = req.query.email;
       const UserId = req.query.id;
+      const isWriter = await allUser.findOne({
+        _id: new ObjectId(UserId),
+        email: UserEmail,
+        role: "writer",
+      });
+      if (!isWriter) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not authorized to view this data",
+        });
+      }
       const FilteredEbooks = await allEbook
         .find({
           authorId: UserId,
@@ -300,88 +314,13 @@ async function run() {
       });
     });
 
-    // Ban or Unban a user (toggle)
-    app.patch("/api/admin/ban-user/:adminId", async (req, res) => {
-      const { adminId } = req.params;
-      const { userId } = req.body;
-      // Verify admin
-      const isAdmin = await allUser.findOne({
-        _id: new ObjectId(adminId),
-        role: "admin",
-      });
-      if (!isAdmin) {
-        return res.status(403).json({
-          success: false,
-          message: "You are not authorized to ban/unban users",
-        });
-      }
-      // Check current ban status
-      const targetUser = await allUser.findOne({ _id: new ObjectId(userId) });
-      if (!targetUser) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found",
-        });
-      }
-      if (targetUser.isBanned) {
-        const UnBan = await allUser.updateOne(
-          { _id: new ObjectId(userId) },
-          { $set: { isBanned: false } },
-        );
-        return res.json({
-          success: true,
-          message: "User UnBanned successfully",
-        });
-      }
-      const newBanStatus = !targetUser.isBanned;
-      await allUser.updateOne(
-        { _id: new ObjectId(userId) },
-        { $set: { isBanned: true } },
-      );
-      await db.collection("session").deleteMany({ userId: targetUser });
-      res.json({
-        success: true,
-        message: "User banned successfully",
-      });
-    });
-
-    // Change user role
-    app.patch("/api/admin/change-role/:adminId", async (req, res) => {
-      const { adminId } = req.params;
-      const { userId, role } = req.body;
-      // Verify admin
-      const isAdmin = await allUser.findOne({
-        _id: new ObjectId(adminId),
-        role: "admin",
-      });
-      if (!isAdmin) {
-        return res.status(403).json({
-          success: false,
-          message: "You are not authorized to change user roles",
-        });
-      }
-      const targetUser = await allUser.findOne({ _id: new ObjectId(userId) });
-      if (!targetUser) {
-        return res.status(404).json({
-          success: false,
-          message: "User not found",
-        });
-      }
-      await allUser.updateOne(
-        { _id: new ObjectId(userId) },
-        { $set: { role } },
-      );
-      res.json({
-        success: true,
-        message: `User role changed to ${role} successfully`,
-      });
-    });
 
     // a specific api for admin only
     app.get("/api/admin/manage-ebook/:adminId", async (req, res) => {
       const { adminId } = req.params;
-      const isAdmin = allUser.findOne({
+      const isAdmin = await allUser.findOne({
         _id: new ObjectId(adminId),
+        role: "admin",
       });
       if (!isAdmin) {
         return {
@@ -397,10 +336,11 @@ async function run() {
         data: allEbooks,
       });
     });
+
     app.patch("/api/admin/manage-ebook/publish-unpublish", async (req, res) => {
       const { ebookId, adminId } = req.body;
       // const {adminId} = req.params;
-      const isAdmin = allUser.findOne({
+      const isAdmin = await allUser.findOne({
         _id: new ObjectId(adminId),
       });
       if (!isAdmin) {
@@ -409,10 +349,20 @@ async function run() {
           message: "You are not authorized for this action ",
         };
       }
+      const alreadyPurchased = await allEbook.findOne({
+        _id: new ObjectId(ebookId),
+        isPurchased: true,
+      });
       const isAlreadyPublished = await allEbook.findOne({
         _id: new ObjectId(ebookId),
-        isPublished: true,
+        status: "sold",
       });
+      if (alreadyPurchased) {
+        return res.json({
+          success: false,
+          message: "This ebook has already been purchased and cannot be unpublished",
+        });
+      }
       if (isAlreadyPublished) {
         const UpdateResults = await allEbook.updateOne(
           { _id: new ObjectId(ebookId) },
@@ -436,6 +386,15 @@ async function run() {
 
     app.delete("/api/admin/manage-ebook/delete", async (req, res) => {
       const { id: ebookId, adminId } = req.body;
+      const isAdmin = await allUser.findOne({
+        _id: new ObjectId(adminId),
+      });
+      if (!isAdmin) {
+        return {
+          success: false,
+          message: "You are not authorized for this action ",
+        };
+      }
       const ebookData = await allEbook.deleteOne({
         _id: new ObjectId(ebookId),
       });
@@ -449,7 +408,7 @@ async function run() {
       });
     });
 
-    app.get("/api/admin/all-transactions", async (req, res) => {
+    app.get("/api/admin/all-transactions", async (req, res) => { // not complete yet
       try {
         // 1. Fetch every single transaction record from your database
         const transactions = await paymentCollection
