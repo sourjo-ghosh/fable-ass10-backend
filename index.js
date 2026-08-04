@@ -31,7 +31,7 @@ async function run() {
     const paymentCollection = db.collection("payment");
     // For Writer ----------------------------------------------
     app.post("/api/add-ebook", async (req, res) => {
-      const {bookData, userId} = req.body;
+      const { bookData, userId } = req.body;
       const is_real_writer = await allUser.findOne({
         _id: new ObjectId(userId),
         role: "writer",
@@ -49,7 +49,8 @@ async function run() {
       if (!IsVerifiedWriter) {
         return res.status(403).json({
           success: false,
-          message: "You are not a verified writer. Please verify your account to add an ebook.",
+          message:
+            "You are not a verified writer. Please verify your account to add an ebook.",
         });
       }
       const isAlreadyExists = await allEbook.findOne({
@@ -314,7 +315,6 @@ async function run() {
       });
     });
 
-
     // a specific api for admin only
     app.get("/api/admin/manage-ebook/:adminId", async (req, res) => {
       const { adminId } = req.params;
@@ -360,7 +360,8 @@ async function run() {
       if (alreadyPurchased) {
         return res.json({
           success: false,
-          message: "This ebook has already been purchased and cannot be unpublished",
+          message:
+            "This ebook has already been purchased and cannot be unpublished",
         });
       }
       if (isAlreadyPublished) {
@@ -408,26 +409,33 @@ async function run() {
       });
     });
 
-    app.get("/api/admin/all-transactions", async (req, res) => { // not complete yet
+    app.get("/api/admin/all-transactions/:userId", async (req, res) => {
       try {
-        // 1. Fetch every single transaction record from your database
+        const { userId } = req.params;
+        const isAdmin = await allUser.findOne({
+          _id: new ObjectId(userId),
+          role: "admin",
+        });
+        if (!isAdmin) {
+          return res.status(403).json({
+            success: false,
+            message: "You are not authorized for this action",
+          });
+        }
         const transactions = await paymentCollection
           .find({})
           .sort({ createdAt: -1 })
           .toArray();
         const resultList = [];
 
-        // 2. Loop through each payment record to attach details
         for (const tx of transactions) {
-          // Find the user/writer document to get their email
           const account = await allUser.findOne({
             _id: new ObjectId(tx.userId),
           });
 
           resultList.push({
-            transactionId: tx._id,
-            // If 'type' is saved in your DB use it, otherwise fall back based on price/metadata
-            type: tx.type || "purchase",
+            id: tx.paymentIntentId,
+            type: tx.paymentType || "purchase",
             email: account ? account.email : "Unknown Account",
             amount: tx.amount ? (tx.amount / 100).toFixed(2) : "0.00",
             date: tx.createdAt,
@@ -438,6 +446,63 @@ async function run() {
       } catch (err) {
         console.error(err);
         res.status(500).json({ success: false, message: err.message });
+      }
+    });
+
+    app.get("/api/admin/analytics-overview/:userId", async (req, res) => {
+      try {
+        const { userId } = req.params;
+
+        const isAdmin = await allUser.findOne({
+          _id: new ObjectId(userId),
+          role: "admin",
+        });
+
+        if (!isAdmin) {
+          return res.status(403).json({
+            success: false,
+            message: "You are not authorized to view admin analytics",
+          });
+        }
+
+        const totalUsers = await allUser.countDocuments({ role: "reader" });
+        const totalWriters = await allUser.countDocuments({ role: "writer" });
+
+
+        const totalEbooksSold = await paymentCollection.countDocuments({
+          paymentType: "ebook_purchase",
+        });
+
+        const successfulPayments = await paymentCollection
+          .find({
+            paymentStatus: "paid",
+          })
+          .toArray();
+
+        let totalRevenueCents = 0;
+
+        for (const payment of successfulPayments) {
+          totalRevenueCents += payment.amount || 0;
+        }
+
+        const totalRevenue = (totalRevenueCents / 100).toFixed(2);
+
+        res.json({
+          success: true,
+          message: "Admin analytics data retrieved successfully",
+          data: {
+            totalUsers,
+            totalWriters,
+            totalEbooksSold,
+            totalRevenue,
+          },
+        });
+      } catch (err) {
+        console.error("Admin analytics error:", err);
+        res.status(500).json({
+          success: false,
+          message: err.message,
+        });
       }
     });
 
